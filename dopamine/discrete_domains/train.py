@@ -20,8 +20,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-
-
 from absl import app
 from absl import flags
 
@@ -29,17 +27,18 @@ from dopamine.discrete_domains import run_experiment
 
 import tensorflow.compat.v1 as tf
 
-
-flags.DEFINE_string('base_dir', None,
+flags.DEFINE_string('base_dir', "/home/fengmx/dopamine_results/fqf_debug",
                     'Base directory to host all required sub-directories.')
 flags.DEFINE_multi_string(
-    'gin_files', [], 'List of paths to gin configuration files (e.g.'
-    '"dopamine/agents/dqn/dqn.gin").')
+  'gin_files',
+  ["/home/fengmx/dopamine/dopamine/agents/fqf/configs/fqf.gin"],
+  'List of paths to gin configuration files '
+  '(e.g.''"dopamine/agents/dqn/dqn.gin").')
 flags.DEFINE_multi_string(
-    'gin_bindings', [],
-    'Gin bindings to override the values set in the config files '
-    '(e.g. "DQNAgent.epsilon_train=0.1",'
-    '      "create_environment.game_name="Pong"").')
+  'gin_bindings', [],
+  'Gin bindings to override the values set in the config files '
+  '(e.g. "DQNAgent.epsilon_train=0.1",'
+  '      "create_environment.game_name="Pong"").')
 
 FLAGS = flags.FLAGS
 
@@ -57,5 +56,5 @@ def main(unused_argv):
 
 
 if __name__ == '__main__':
-  flags.mark_flag_as_required('base_dir')
+  # flags.mark_flag_as_required('base_dir')
   app.run(main)

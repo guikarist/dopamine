@@ -23,6 +23,7 @@ import sys
 import time
 
 from dopamine.agents.dqn import dqn_agent
+from dopamine.agents.fqf import fqf_agent
 from dopamine.agents.implicit_quantile import implicit_quantile_agent
 from dopamine.agents.rainbow import rainbow_agent
 from dopamine.discrete_domains import atari_lib
@@ -79,12 +80,16 @@ def create_agent(sess, environment, agent_name=None, summary_writer=None,
                               summary_writer=summary_writer)
   elif agent_name == 'rainbow':
     return rainbow_agent.RainbowAgent(
-        sess, num_actions=environment.action_space.n,
-        summary_writer=summary_writer)
+      sess, num_actions=environment.action_space.n,
+      summary_writer=summary_writer)
   elif agent_name == 'implicit_quantile':
     return implicit_quantile_agent.ImplicitQuantileAgent(
-        sess, num_actions=environment.action_space.n,
-        summary_writer=summary_writer)
+      sess, num_actions=environment.action_space.n,
+      summary_writer=summary_writer)
+  elif agent_name == 'fqf':
+    return fqf_agent.FullyParameterizedQuantileAgent(
+      sess, num_actions=environment.action_space.n,
+      summary_writer=summary_writer)
   else:
     raise ValueError('Unknown agent: {}'.format(agent_name))
 
@@ -133,7 +138,7 @@ class Runner(object):
   runner.run()
   ```
   """
-
+  
   def __init__(self,
                base_dir,
                create_agent_fn,
@@ -181,7 +186,7 @@ class Runner(object):
     self._base_dir = base_dir
     self._create_directories()
     self._summary_writer = tf.summary.FileWriter(self._base_dir)
-
+    
     self._environment = create_environment_fn()
     config = tf.ConfigProto(allow_soft_placement=True)
     # Allocate only subset of the GPU memory as needed which allows for running
@@ -193,14 +198,14 @@ class Runner(object):
                                   summary_writer=self._summary_writer)
     self._summary_writer.add_graph(graph=tf.get_default_graph())
     self._sess.run(tf.global_variables_initializer())
-
+    
     self._initialize_checkpointer_and_maybe_resume(checkpoint_file_prefix)
-
+  
   def _create_directories(self):
     """Create necessary sub-directories."""
     self._checkpoint_dir = os.path.join(self._base_dir, 'checkpoints')
     self._logger = logger.Logger(os.path.join(self._base_dir, 'logs'))
-
+  
   def _initialize_checkpointer_and_maybe_resume(self, checkpoint_file_prefix):
     """Reloads the latest checkpoint if it exists.
 
@@ -228,10 +233,10 @@ class Runner(object):
     # Check if checkpoint exists. Note that the existence of checkpoint 0 means
     # that we have finished iteration 0 (so we will start from iteration 1).
     latest_checkpoint_version = checkpointer.get_latest_checkpoint_number(
-        self._checkpoint_dir)
+      self._checkpoint_dir)
     if latest_checkpoint_version >= 0:
       experiment_data = self._checkpointer.load_checkpoint(
-          latest_checkpoint_version)
+        latest_checkpoint_version)
       if self._agent.unbundle(
           self._checkpoint_dir, latest_checkpoint_version, experiment_data):
         if experiment_data is not None:
@@ -241,7 +246,7 @@ class Runner(object):
           self._start_iteration = experiment_data['current_iteration'] + 1
         tf.logging.info('Reloaded checkpoint and will start from iteration %d',
                         self._start_iteration)
-
+  
   def _initialize_episode(self):
     """Initialization for a new episode.
 
@@ -250,7 +255,7 @@ class Runner(object):
     """
     initial_observation = self._environment.reset()
     return self._agent.begin_episode(initial_observation)
-
+  
   def _run_one_step(self, action):
     """Executes a single step in the environment.
 
@@ -263,7 +268,7 @@ class Runner(object):
     """
     observation, reward, is_terminal, _ = self._environment.step(action)
     return observation, reward, is_terminal
-
+  
   def _end_episode(self, reward):
     """Finalizes an episode run.
 
@@ -271,7 +276,7 @@ class Runner(object):
       reward: float, the last reward from the environment.
     """
     self._agent.end_episode(reward)
-
+  
   def _run_one_episode(self):
     """Executes a full trajectory of the agent interacting with the environment.
 
@@ -280,20 +285,20 @@ class Runner(object):
     """
     step_number = 0
     total_reward = 0.
-
+    
     action = self._initialize_episode()
     is_terminal = False
-
+    
     # Keep interacting until we reach a terminal state.
     while True:
       observation, reward, is_terminal = self._run_one_step(action)
-
+      
       total_reward += reward
       step_number += 1
-
+      
       # Perform reward clipping.
       reward = np.clip(reward, -1, 1)
-
+      
       if (self._environment.game_over or
           step_number == self._max_steps_per_episode):
         # Stop the run loop once we reach the true end of episode.
@@ -305,11 +310,11 @@ class Runner(object):
         action = self._agent.begin_episode(observation)
       else:
         action = self._agent.step(reward, observation)
-
+    
     self._end_episode(reward)
-
+    
     return step_number, total_reward
-
+  
   def _run_one_phase(self, min_steps, statistics, run_mode_str):
     """Runs the agent/environment loop until a desired number of steps.
 
@@ -329,12 +334,12 @@ class Runner(object):
     step_count = 0
     num_episodes = 0
     sum_returns = 0.
-
+    
     while step_count < min_steps:
       episode_length, episode_return = self._run_one_episode()
       statistics.append({
-          '{}_episode_lengths'.format(run_mode_str): episode_length,
-          '{}_episode_returns'.format(run_mode_str): episode_return
+        '{}_episode_lengths'.format(run_mode_str): episode_length,
+        '{}_episode_returns'.format(run_mode_str): episode_return
       })
       step_count += episode_length
       sum_returns += episode_return
@@ -346,7 +351,7 @@ class Runner(object):
                        'Return: {}\r'.format(episode_return))
       sys.stdout.flush()
     return step_count, sum_returns, num_episodes
-
+  
   def _run_train_phase(self, statistics):
     """Run training phase.
 
@@ -362,7 +367,7 @@ class Runner(object):
     self._agent.eval_mode = False
     start_time = time.time()
     number_steps, sum_returns, num_episodes = self._run_one_phase(
-        self._training_steps, statistics, 'train')
+      self._training_steps, statistics, 'train')
     average_return = sum_returns / num_episodes if num_episodes > 0 else 0.0
     statistics.append({'train_average_return': average_return})
     time_delta = time.time() - start_time
@@ -371,7 +376,7 @@ class Runner(object):
     tf.logging.info('Average training steps per second: %.2f',
                     number_steps / time_delta)
     return num_episodes, average_return
-
+  
   def _run_eval_phase(self, statistics):
     """Run evaluation phase.
 
@@ -386,13 +391,13 @@ class Runner(object):
     # Perform the evaluation phase -- no learning.
     self._agent.eval_mode = True
     _, sum_returns, num_episodes = self._run_one_phase(
-        self._evaluation_steps, statistics, 'eval')
+      self._evaluation_steps, statistics, 'eval')
     average_return = sum_returns / num_episodes if num_episodes > 0 else 0.0
     tf.logging.info('Average undiscounted return per evaluation episode: %.2f',
                     average_return)
     statistics.append({'eval_average_return': average_return})
     return num_episodes, average_return
-
+  
   def _run_one_iteration(self, iteration):
     """Runs one iteration of agent/environment interaction.
 
@@ -410,15 +415,15 @@ class Runner(object):
     statistics = iteration_statistics.IterationStatistics()
     tf.logging.info('Starting iteration %d', iteration)
     num_episodes_train, average_reward_train = self._run_train_phase(
-        statistics)
+      statistics)
     num_episodes_eval, average_reward_eval = self._run_eval_phase(
-        statistics)
-
+      statistics)
+    
     self._save_tensorboard_summaries(iteration, num_episodes_train,
                                      average_reward_train, num_episodes_eval,
                                      average_reward_eval)
     return statistics.data_lists
-
+  
   def _save_tensorboard_summaries(self, iteration,
                                   num_episodes_train,
                                   average_reward_train,
@@ -434,17 +439,17 @@ class Runner(object):
       average_reward_eval: float, The average evaluation reward.
     """
     summary = tf.Summary(value=[
-        tf.Summary.Value(tag='Train/NumEpisodes',
-                         simple_value=num_episodes_train),
-        tf.Summary.Value(tag='Train/AverageReturns',
-                         simple_value=average_reward_train),
-        tf.Summary.Value(tag='Eval/NumEpisodes',
-                         simple_value=num_episodes_eval),
-        tf.Summary.Value(tag='Eval/AverageReturns',
-                         simple_value=average_reward_eval)
+      tf.Summary.Value(tag='Train/NumEpisodes',
+                       simple_value=num_episodes_train),
+      tf.Summary.Value(tag='Train/AverageReturns',
+                       simple_value=average_reward_train),
+      tf.Summary.Value(tag='Eval/NumEpisodes',
+                       simple_value=num_episodes_eval),
+      tf.Summary.Value(tag='Eval/AverageReturns',
+                       simple_value=average_reward_eval)
     ])
     self._summary_writer.add_summary(summary, iteration)
-
+  
   def _log_experiment(self, iteration, statistics):
     """Records the results of the current iteration.
 
@@ -455,7 +460,7 @@ class Runner(object):
     self._logger['iteration_{:d}'.format(iteration)] = statistics
     if iteration % self._log_every_n == 0:
       self._logger.log_to_file(self._logging_file_prefix, iteration)
-
+  
   def _checkpoint_experiment(self, iteration):
     """Checkpoint experiment data.
 
@@ -468,7 +473,7 @@ class Runner(object):
       experiment_data['current_iteration'] = iteration
       experiment_data['logs'] = self._logger.data
       self._checkpointer.save_checkpoint(iteration, experiment_data)
-
+  
   def run_experiment(self):
     """Runs a full experiment, spread over multiple iterations."""
     tf.logging.info('Beginning training...')
@@ -476,7 +481,7 @@ class Runner(object):
       tf.logging.warning('num_iterations (%d) < start_iteration(%d)',
                          self._num_iterations, self._start_iteration)
       return
-
+    
     for iteration in range(self._start_iteration, self._num_iterations):
       statistics = self._run_one_iteration(iteration)
       self._log_experiment(iteration, statistics)
@@ -491,7 +496,7 @@ class TrainRunner(Runner):
   the evaluation phase. Checkpointing and logging for the train phase are
   preserved as before.
   """
-
+  
   def __init__(self, base_dir, create_agent_fn,
                create_environment_fn=atari_lib.create_atari_environment):
     """Initialize the TrainRunner object in charge of running a full experiment.
@@ -507,7 +512,7 @@ class TrainRunner(Runner):
     super(TrainRunner, self).__init__(base_dir, create_agent_fn,
                                       create_environment_fn)
     self._agent.eval_mode = False
-
+  
   def _run_one_iteration(self, iteration):
     """Runs one iteration of agent/environment interaction.
 
@@ -524,18 +529,18 @@ class TrainRunner(Runner):
     """
     statistics = iteration_statistics.IterationStatistics()
     num_episodes_train, average_reward_train = self._run_train_phase(
-        statistics)
-
+      statistics)
+    
     self._save_tensorboard_summaries(iteration, num_episodes_train,
                                      average_reward_train)
     return statistics.data_lists
-
+  
   def _save_tensorboard_summaries(self, iteration, num_episodes,
                                   average_reward):
     """Save statistics as tensorboard summaries."""
     summary = tf.Summary(value=[
-        tf.Summary.Value(tag='Train/NumEpisodes', simple_value=num_episodes),
-        tf.Summary.Value(
-            tag='Train/AverageReturns', simple_value=average_reward),
+      tf.Summary.Value(tag='Train/NumEpisodes', simple_value=num_episodes),
+      tf.Summary.Value(
+        tag='Train/AverageReturns', simple_value=average_reward),
     ])
     self._summary_writer.add_summary(summary, iteration)
