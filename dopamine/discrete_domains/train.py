@@ -27,11 +27,14 @@ from dopamine.discrete_domains import run_experiment
 
 import tensorflow.compat.v1 as tf
 
-flags.DEFINE_string('base_dir', "/home/fengmx/dopamine_results/fqf_debug",
+flags.DEFINE_string('base_dir', "/data/fengmx/dopamine_results/fqf_debug",
                     'Base directory to host all required sub-directories.')
 flags.DEFINE_multi_string(
   'gin_files',
-  ["/home/fengmx/dopamine/dopamine/agents/fqf/configs/fqf.gin"],
+  [
+    "/data/fengmx/dopamine/dopamine/agents/fqf/configs/fqf.gin",
+    # "/data/fengmx/dopamine/dopamine/agents/implicit_quantile/configs/implicit_quantile.gin"
+  ],
   'List of paths to gin configuration files '
   '(e.g.''"dopamine/agents/dqn/dqn.gin").')
 flags.DEFINE_multi_string(

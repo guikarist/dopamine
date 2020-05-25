@@ -9,8 +9,8 @@ import dopamine.replay_memory.prioritized_replay_buffer
 import gin.tf.external_configurables
 
 ImplicitQuantileAgent.kappa = 1.0
-ImplicitQuantileAgent.num_tau_samples = 64
-ImplicitQuantileAgent.num_tau_prime_samples = 64
+ImplicitQuantileAgent.num_tau_samples = 32
+ImplicitQuantileAgent.num_tau_prime_samples = 32
 ImplicitQuantileAgent.num_quantile_samples = 32
 RainbowAgent.gamma = 0.99
 RainbowAgent.update_horizon = 3
@@ -33,8 +33,8 @@ atari_lib.create_atari_environment.game_name = 'Pong'
 atari_lib.create_atari_environment.sticky_actions = True
 create_agent.agent_name = 'implicit_quantile'
 Runner.num_iterations = 200
-Runner.training_steps = 250000
-Runner.evaluation_steps = 125000
+Runner.training_steps = 25000
+Runner.evaluation_steps = 12500
 Runner.max_steps_per_episode = 27000
 
 WrappedPrioritizedReplayBuffer.replay_capacity = 1000000

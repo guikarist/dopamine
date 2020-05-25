@@ -479,7 +479,8 @@ class AtariPreprocessing(object):
 # TODO 1.1 复刻IQN的网络，只是改名为FQF
 class FullyParameterizedQuantileNetwork(tf.keras.Model):
   
-  def __init__(self, num_actions, quantile_embedding_dim, name=None):
+  def __init__(self, num_actions, quantile_embedding_dim, num_quantiles,
+               name=None):
     """Creates the layers used calculating quantile values.
     Args:
       num_actions: int, number of actions.
@@ -489,6 +490,7 @@ class FullyParameterizedQuantileNetwork(tf.keras.Model):
     super(FullyParameterizedQuantileNetwork, self).__init__(name=name)
     self.num_actions = num_actions
     self.quantile_embedding_dim = quantile_embedding_dim
+    self.default_num_quantiles = num_quantiles
     # We need the activation function during `call`, therefore set the field.
     self.activation_fn = tf.keras.activations.relu
     self.kernel_initializer = tf.keras.initializers.VarianceScaling(
@@ -511,7 +513,7 @@ class FullyParameterizedQuantileNetwork(tf.keras.Model):
       num_actions, kernel_initializer=self.kernel_initializer,
       name='fully_connected')
   
-  def call(self, state, num_quantiles):
+  def call(self, state, taus=None, fraction_proposal_net=None):
     """Creates the output tensor/op given the state tensor as input.
     See https://www.tensorflow.org/api_docs/python/tf/keras/Model for more
     information on this. Note that tf.keras.Model implements `call` which is
@@ -522,6 +524,12 @@ class FullyParameterizedQuantileNetwork(tf.keras.Model):
     Returns:
       collections.namedtuple, that contains (quantile_values, quantiles).
     """
+    assert taus or fraction_proposal_net
+    # 确定quantiles的数量，如果是使用指定的quantiles就更改长度
+    num_quantiles = self.default_num_quantiles
+    if taus:
+      num_quantiles = taus.get_shape().as_list()[1]
+    
     batch_size = state.get_shape().as_list()[0]
     x = tf.cast(state, tf.float32)
     x = tf.div(x, 255.)
@@ -532,8 +540,16 @@ class FullyParameterizedQuantileNetwork(tf.keras.Model):
     state_vector_length = x.get_shape().as_list()[-1]
     state_net_tiled = tf.tile(x, [num_quantiles, 1])
     quantiles_shape = [num_quantiles * batch_size, 1]
-    quantiles = tf.random_uniform(
-      quantiles_shape, minval=0, maxval=1, dtype=tf.float32)
+    # shape of taus: batch_size x num_quantiles
+    if taus:
+      quantiles = taus
+    else:
+      taus_1_to_N = fraction_proposal_net(x)
+      taus_0 = tf.zeros([batch_size, 1])
+      taus_0_to_N = tf.concat([taus_0, taus_1_to_N], axis=1)
+      quantiles = (taus_0_to_N[:, :-1] + taus_0_to_N[:, 1:]) / 2.0
+    quantiles = tf.transpose(tf.stop_gradient(quantiles))
+    quantiles = tf.reshape(quantiles, quantiles_shape)
     quantile_net = tf.tile(quantiles, [1, self.quantile_embedding_dim])
     pi = tf.constant(math.pi)
     quantile_net = tf.cast(tf.range(
@@ -552,5 +568,26 @@ class FullyParameterizedQuantileNetwork(tf.keras.Model):
     quantile_values = self.dense2(x)
     return FullyParameterizedQuantileNetworkType(quantile_values, quantiles)
 
-# TODO 1.2 定义FPN网络
+
+# TODO 1.2 定义FPN网络，接入FQF
+
+class FractionProposalNetork(tf.keras.Model):
+  def __init__(self, num_quantiles=32, name=None):
+    super(FractionProposalNetork, self).__init__(name=name)
+    # 我们约定FPN输出的是tau,tau的中点是quantiles
+    self.num_quantiles = num_quantiles
+    self.activation_fn = tf.nn.log_softmax
+    self.kernel_initializer = tf.keras.initializers.VarianceScaling(
+      scale=1.0 / np.sqrt(3.0), mode='fan_in', distribution='uniform')
+    self.dense = tf.keras.layers.Dense(
+      num_quantiles,
+      activation=self.activation_fn,
+      kernel_initializer=self.kernel_initializer)
+  
+  def call(self, state_embedding):
+    x = tf.stop_gradient(state_embedding)
+    log_probs = self.dense(x)
+    probs = tf.exp(log_probs)
+    taus = tf.cumsum(probs, axis=1)
+    return tf.stop_gradient(taus)
 # TODO 1.3 修改FQF网络，输入增加现成的quantiles，输出增加state_embedding
