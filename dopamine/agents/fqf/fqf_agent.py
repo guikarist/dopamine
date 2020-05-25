@@ -129,11 +129,18 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
     
     # Shape of self._net_outputs.quantile_values:
     # num_quantile_samples x num_actions.
-    # e.g. if num_actions is 2, it might look something like this:
-    # Vals for Quantile .2  Vals for Quantile .4  Vals for Quantile .6
-    #    [[0.1, 0.5],         [0.15, -0.3],          [0.15, -0.2]]
-    # Q-values = [(0.1 + 0.15 + 0.15)/3, (0.5 + 0.15 + -0.2)/3].
-    self._q_values = tf.reduce_mean(self._net_outputs.quantile_values, axis=0)
+    # TODO 这里需要对Quantile_values做加权，权重就是\tau_i-\tau_{i-1}
+    # Shape of self._net_outputs.quantiles:
+    # num_quantile_samples x 1.
+    # Shape of self._net_outputs.taus:
+    # batch_size x num_quantile_samples
+    # 静态图构建时batch_size=1
+    self._net_taus = tf.transpose(self._net_outputs.taus)
+    self._net_delta_taus = self._net_taus[1:] - self._net_taus[:-1]
+    self._net_quantile_values = self._net_outputs.quantile_values
+    self._q_values = tf.reduce_sum(tf.multiply(self._net_delta_taus,
+                                               self._net_quantile_values),
+                                   axis=0)
     self._q_argmax = tf.argmax(self._q_values, axis=0)
     
     self._replay_net_outputs = self.online_convnet(

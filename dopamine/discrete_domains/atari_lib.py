@@ -58,7 +58,7 @@ RainbowNetworkType = collections.namedtuple(
 ImplicitQuantileNetworkType = collections.namedtuple(
   'iqn_network', ['quantile_values', 'quantiles'])
 FullyParameterizedQuantileNetworkType = collections.namedtuple(
-  'fqf_network', ['quantile_values', 'quantiles'])
+  'fqf_network', ['quantile_values', 'quantiles', 'taus'])
 
 
 @gin.configurable
@@ -566,7 +566,11 @@ class FullyParameterizedQuantileNetwork(tf.keras.Model):
     x = tf.multiply(state_net_tiled, quantile_net)
     x = self.dense1(x)
     quantile_values = self.dense2(x)
-    return FullyParameterizedQuantileNetworkType(quantile_values, quantiles)
+    ret = FullyParameterizedQuantileNetworkType(quantile_values, quantiles,
+                                                None)
+    if not taus:
+      return ret._replace(taus=taus_0_to_N)
+    return ret
 
 
 # TODO 1.2 定义FPN网络，接入FQF
@@ -590,4 +594,3 @@ class FractionProposalNetork(tf.keras.Model):
     probs = tf.exp(log_probs)
     taus = tf.cumsum(probs, axis=1)
     return tf.stop_gradient(taus)
-# TODO 1.3 修改FQF网络，输入增加现成的quantiles，输出增加state_embedding

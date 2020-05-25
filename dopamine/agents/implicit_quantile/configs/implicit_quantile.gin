@@ -22,7 +22,7 @@ RainbowAgent.epsilon_eval = 0.001
 RainbowAgent.epsilon_decay_period = 250000  # agent steps
 # IQN currently does not support prioritized replay.
 RainbowAgent.replay_scheme = 'uniform'
-RainbowAgent.tf_device = '/gpu:0'  # '/cpu:*' use for non-GPU version
+RainbowAgent.tf_device = '/gpu:4'  # '/cpu:*' use for non-GPU version
 RainbowAgent.optimizer = @tf.train.AdamOptimizer()
 
 tf.train.AdamOptimizer.learning_rate = 0.00005
@@ -33,8 +33,8 @@ atari_lib.create_atari_environment.game_name = 'Pong'
 atari_lib.create_atari_environment.sticky_actions = True
 create_agent.agent_name = 'implicit_quantile'
 Runner.num_iterations = 200
-Runner.training_steps = 25000
-Runner.evaluation_steps = 12500
+Runner.training_steps = 250000
+Runner.evaluation_steps = 125000
 Runner.max_steps_per_episode = 27000
 
 WrappedPrioritizedReplayBuffer.replay_capacity = 1000000
