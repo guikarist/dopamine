@@ -19,7 +19,7 @@ RainbowAgent.epsilon_train = 0.01
 RainbowAgent.epsilon_eval = 0.001
 RainbowAgent.epsilon_decay_period = 250000 # agent steps
 RainbowAgent.replay_scheme = 'uniform'
-RainbowAgent.tf_device = '/gpu:6'  # '/cpu:*' use for non-GPU version
+RainbowAgent.tf_device = '/gpu:7'  # '/cpu:*' use for non-GPU version
 RainbowAgent.optimizer = @tf.train.AdamOptimizer()
 
 tf.train.AdamOptimizer.learning_rate = 0.00005

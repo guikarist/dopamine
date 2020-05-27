@@ -29,11 +29,6 @@ import numpy as np
 import gin.tf
 
 
-# TODO 2.1 只修改名称为FQFAgent
-# TODO 2.2 Q值计算
-# TODO 2.3 FPN梯度计算
-
-
 @gin.configurable
 class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
   """An extension of Rainbow to perform implicit quantile regression."""
@@ -129,14 +124,13 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
     
     # Shape of self._net_outputs.quantile_values:
     # num_quantile_samples x num_actions.
-    # TODO 这里需要对Quantile_values做加权，权重就是\tau_i-\tau_{i-1}
     # Shape of self._net_outputs.quantiles:
     # num_quantile_samples x 1.
-    # Shape of self._net_outputs.taus:
+    # Shape of self._net_outputs.fraction_proposal.taus:
     # batch_size x num_quantile_samples
     # 静态图构建时batch_size=1
-    self._net_taus = tf.transpose(self._net_outputs.taus)
-    self._net_delta_taus = self._net_taus[1:] - self._net_taus[:-1]
+    fraction_proposal = self._net_outputs.fraction_proposal
+    self._net_delta_taus = tf.transpose(fraction_proposal.delta_taus)
     self._net_quantile_values = self._net_outputs.quantile_values
     self._q_values = tf.reduce_sum(tf.multiply(self._net_delta_taus,
                                                self._net_quantile_values),
@@ -149,13 +143,15 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
     self._replay_net_quantile_values = self._replay_net_outputs.quantile_values
     self._replay_net_quantiles = self._replay_net_outputs.quantiles
     
-    # Do the same for next states in the replay buffer.
+    # Do the same for next states in the replay buffergather.
+    # 共享quantiles
     self._replay_net_target_outputs = self.target_convnet(
-      self._replay.next_states, fraction_proposal_net=self.tau_mlpnet)
+      self._replay.next_states, proposed_quantiles=self._replay_net_quantiles)
     # Shape: (num_quantile_samples x batch_size) x num_actions.
     vals = self._replay_net_target_outputs.quantile_values
     self._replay_net_target_quantile_values = vals
     
+    # TODO Target网络和Online网络共享FPN得到的quantiles
     # Compute Q-values which are used for action selection for the next states
     # in the replay buffer. Compute the argmax over the Q-values.
     if self.double_dqn:
@@ -172,9 +168,14 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
                                                [self.num_quantile_samples,
                                                 self._replay.batch_size,
                                                 self.num_actions])
+    # Shape: batch_size x num_quantile_samples.
+    target_delta_taus_action = outputs_action.fraction_proposal.delta_taus
+    target_delta_taus_action = tf.transpose(target_delta_taus_action)[..., None]
+    # 这里需要对Target Quantile_values做加权计算Q值，权重就是delta_taus
     # Shape: batch_size x num_actions.
-    self._replay_net_target_q_values = tf.squeeze(tf.reduce_mean(
-      target_quantile_values_action, axis=0))
+    self._replay_net_target_q_values = tf.squeeze(tf.reduce_sum(
+      tf.multiply(target_quantile_values_action, target_delta_taus_action),
+      axis=0))
     self._replay_next_qt_argmax = tf.argmax(
       self._replay_net_target_q_values, axis=1)
   

@@ -58,8 +58,9 @@ RainbowNetworkType = collections.namedtuple(
 ImplicitQuantileNetworkType = collections.namedtuple(
   'iqn_network', ['quantile_values', 'quantiles'])
 FullyParameterizedQuantileNetworkType = collections.namedtuple(
-  'fqf_network', ['quantile_values', 'quantiles', 'taus'])
-
+  'fqf_network', ['quantile_values', 'quantiles', 'fraction_proposal'])
+FractionProposalNetworkType = collections.namedtuple(
+  'fp_network', ['delta_taus', 'taus'])
 
 @gin.configurable
 def create_atari_environment(game_name=None, sticky_actions=True):
@@ -513,24 +514,15 @@ class FullyParameterizedQuantileNetwork(tf.keras.Model):
       num_actions, kernel_initializer=self.kernel_initializer,
       name='fully_connected')
   
-  def call(self, state, taus=None, fraction_proposal_net=None):
-    """Creates the output tensor/op given the state tensor as input.
-    See https://www.tensorflow.org/api_docs/python/tf/keras/Model for more
-    information on this. Note that tf.keras.Model implements `call` which is
-    wrapped by `__call__` function by tf.keras.Model.
-    Args:
-      state: `tf.Tensor`, contains the agent's current state.
-      num_quantiles: int, number of quantile inputs.
-    Returns:
-      collections.namedtuple, that contains (quantile_values, quantiles).
-    """
-    assert taus or fraction_proposal_net
+  def call(self, state, proposed_quantiles=None, fraction_proposal_net=None):
     # 确定quantiles的数量，如果是使用指定的quantiles就更改长度
     num_quantiles = self.default_num_quantiles
-    if taus:
-      num_quantiles = taus.get_shape().as_list()[1]
-    
     batch_size = state.get_shape().as_list()[0]
+    
+    if proposed_quantiles is not None:
+      # shape of proposed quantiles: [num_quantiles * batch_size, 1]
+      num_quantiles = proposed_quantiles.get_shape().as_list()[0] // batch_size
+    
     x = tf.cast(state, tf.float32)
     x = tf.div(x, 255.)
     x = self.conv1(x)
@@ -540,16 +532,17 @@ class FullyParameterizedQuantileNetwork(tf.keras.Model):
     state_vector_length = x.get_shape().as_list()[-1]
     state_net_tiled = tf.tile(x, [num_quantiles, 1])
     quantiles_shape = [num_quantiles * batch_size, 1]
-    # shape of taus: batch_size x num_quantiles
-    if taus:
-      quantiles = taus
+    if proposed_quantiles is not None:
+      quantiles = tf.identity(proposed_quantiles)
     else:
-      taus_1_to_N = fraction_proposal_net(x)
+      # shape of taus: batch_size x num_quantiles+1
+      fraction_proposal = fraction_proposal_net(x)
+      taus_1_to_N = fraction_proposal.taus
       taus_0 = tf.zeros([batch_size, 1])
       taus_0_to_N = tf.concat([taus_0, taus_1_to_N], axis=1)
       quantiles = (taus_0_to_N[:, :-1] + taus_0_to_N[:, 1:]) / 2.0
-    quantiles = tf.transpose(tf.stop_gradient(quantiles))
-    quantiles = tf.reshape(quantiles, quantiles_shape)
+      quantiles = tf.transpose(tf.stop_gradient(quantiles))
+      quantiles = tf.reshape(quantiles, quantiles_shape)
     quantile_net = tf.tile(quantiles, [1, self.quantile_embedding_dim])
     pi = tf.constant(math.pi)
     quantile_net = tf.cast(tf.range(
@@ -568,21 +561,22 @@ class FullyParameterizedQuantileNetwork(tf.keras.Model):
     quantile_values = self.dense2(x)
     ret = FullyParameterizedQuantileNetworkType(quantile_values, quantiles,
                                                 None)
-    if not taus:
-      return ret._replace(taus=taus_0_to_N)
+    if proposed_quantiles is None:
+      return ret._replace(fraction_proposal=fraction_proposal)
     return ret
 
 
 # TODO 1.2 定义FPN网络，接入FQF
 
 class FractionProposalNetork(tf.keras.Model):
-  def __init__(self, num_quantiles=32, name=None):
+  def __init__(self, num_actions, num_quantiles=32, name=None):
     super(FractionProposalNetork, self).__init__(name=name)
     # 我们约定FPN输出的是tau,tau的中点是quantiles
     self.num_quantiles = num_quantiles
     self.activation_fn = tf.nn.log_softmax
     self.kernel_initializer = tf.keras.initializers.VarianceScaling(
       scale=1.0 / np.sqrt(3.0), mode='fan_in', distribution='uniform')
+    # paper里面τ的计算输入是(s,a)pair，但是作者说效率很低并且没有提升
     self.dense = tf.keras.layers.Dense(
       num_quantiles,
       activation=self.activation_fn,
@@ -591,6 +585,6 @@ class FractionProposalNetork(tf.keras.Model):
   def call(self, state_embedding):
     x = tf.stop_gradient(state_embedding)
     log_probs = self.dense(x)
-    probs = tf.exp(log_probs)
-    taus = tf.cumsum(probs, axis=1)
-    return tf.stop_gradient(taus)
+    delta_taus = tf.exp(log_probs)
+    taus = tf.stop_gradient(tf.cumsum(delta_taus, axis=1))
+    return FractionProposalNetworkType(delta_taus=delta_taus, taus=taus)
