@@ -533,11 +533,12 @@ class FullyParameterizedQuantileNetwork(tf.keras.Model):
     state_net_tiled = tf.tile(x, [num_quantiles, 1])
     quantiles_shape = [num_quantiles * batch_size, 1]
     if proposed_quantiles is not None:
-      quantiles = tf.identity(proposed_quantiles)
+      quantiles = tf.stop_gradient(proposed_quantiles)
     else:
       # shape of taus: batch_size x num_quantiles+1
       fraction_proposal = fraction_proposal_net(x)
-      taus_1_to_N = fraction_proposal.taus
+      # 防止梯度BP到FPN网络
+      taus_1_to_N = tf.stop_gradient(fraction_proposal.taus)
       taus_0 = tf.zeros([batch_size, 1])
       taus_0_to_N = tf.concat([taus_0, taus_1_to_N], axis=1)
       quantiles = (taus_0_to_N[:, :-1] + taus_0_to_N[:, 1:]) / 2.0
@@ -583,8 +584,9 @@ class FractionProposalNetork(tf.keras.Model):
       kernel_initializer=self.kernel_initializer)
   
   def call(self, state_embedding):
+    # 不让梯度BP到embedding conv layer
     x = tf.stop_gradient(state_embedding)
     log_probs = self.dense(x)
     delta_taus = tf.exp(log_probs)
-    taus = tf.stop_gradient(tf.cumsum(delta_taus, axis=1))
+    taus = tf.cumsum(delta_taus, axis=1)
     return FractionProposalNetworkType(delta_taus=delta_taus, taus=taus)

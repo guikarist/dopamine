@@ -25,8 +25,8 @@ from __future__ import print_function
 from dopamine.agents.rainbow import rainbow_agent
 from dopamine.discrete_domains import atari_lib
 import tensorflow.compat.v1 as tf
-import numpy as np
 import gin.tf
+import os
 
 
 @gin.configurable
@@ -36,11 +36,17 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
   def __init__(self,
                sess,
                num_actions,
-               network=atari_lib.FullyParameterizedQuantileNetwork,
+               quantile_value_network=atari_lib.FullyParameterizedQuantileNetwork,
+               fraction_proposal_network=atari_lib.FractionProposalNetork,
                kappa=1.0,
                num_quantile_samples=32,
                quantile_embedding_dim=64,
                double_dqn=False,
+               quantile_value_optimizer=tf.train.AdamOptimizer(
+                 learning_rate=0.00025, epsilon=0.0003125),
+               fraction_proposal_optimizer=tf.train.RMSPropOptimizer(
+                 learning_rate=2.5e-9, decay=0.95, epsilon=0.00001,
+                 centered=True),
                summary_writer=None,
                summary_writing_frequency=500):
     """Initializes the agent and constructs the Graph.
@@ -71,6 +77,10 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
       summary_writing_frequency: int, frequency with which summaries will be
         written. Lower values will result in slower training.
     """
+    self.quantile_value_network = quantile_value_network
+    self.fraction_proposal_network = fraction_proposal_network
+    self.quantile_value_optimizer = quantile_value_optimizer
+    self.fraction_proposal_optimizer = fraction_proposal_optimizer
     self.kappa = kappa
     # num_quantile_samples = k below equation (3) in the paper.
     self.num_quantile_samples = num_quantile_samples
@@ -82,7 +92,6 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
     super(FullyParameterizedQuantileAgent, self).__init__(
       sess=sess,
       num_actions=num_actions,
-      network=network,
       summary_writer=summary_writer,
       summary_writing_frequency=summary_writing_frequency)
   
@@ -95,8 +104,9 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
     Returns:
       network: tf.keras.Model, the network instantiated by the Keras model.
     """
-    network = self.network(self.num_actions, self.quantile_embedding_dim,
-                           self.num_quantile_samples, name=name)
+    network = self.quantile_value_network(self.num_actions,
+                                          self.quantile_embedding_dim,
+                                          self.num_quantile_samples, name=name)
     return network
   
   def _build_networks(self):
@@ -112,7 +122,7 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
       self._replay_next_target_net_outputs: The replayed next states' target
         quantile values.
     """
-    self.tau_mlpnet = atari_lib.FractionProposalNetork(
+    self.tau_mlpnet = self.fraction_proposal_network(
       self.num_quantile_samples, name="FPN")
     self.online_convnet = self._create_network(name='Online')
     self.target_convnet = self._create_network(name='Target')
@@ -141,7 +151,12 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
       self._replay.states, fraction_proposal_net=self.tau_mlpnet)
     # Shape: (num_quantile_samples x batch_size) x num_actions.
     self._replay_net_quantile_values = self._replay_net_outputs.quantile_values
+    # Shape: (num_quantile_samples x batch_size) x 1
     self._replay_net_quantiles = self._replay_net_outputs.quantiles
+    # Shape: [batch_size x (num_quantile_samples-1), 1]
+    val_taus = self._replay_net_outputs.fraction_proposal.taus[:, :-1]
+    taus_shape = [(self.num_quantile_samples - 1) * self._replay.batch_size, 1]
+    self._replay_net_taus = tf.reshape(tf.transpose(val_taus), taus_shape)
     
     # Do the same for next states in the replay buffergather.
     # 共享quantiles
@@ -178,6 +193,13 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
       axis=0))
     self._replay_next_qt_argmax = tf.argmax(
       self._replay_net_target_q_values, axis=1)
+    
+    # 计算F_Z^{-1}(\tau)
+    replay_tau_outputs = self.online_convnet(
+      self._replay.states, proposed_quantiles=self._replay_net_taus)
+    # Shape: (num_quantile_samples-1 x batch_size) x num_actions.
+    self._replay_net_tau_values = tf.stop_gradient(
+      replay_tau_outputs.quantile_values)
   
   def _build_target_quantile_values_op(self):
     """Build an op used as a target for return values at given quantiles.
@@ -304,10 +326,38 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
     # Shape: batch_size x 1.
     loss = tf.reduce_mean(loss, axis=1)
     
+    scope = tf.get_default_graph().get_name_scope()
+    trainables_fpn = tf.get_collection(
+      tf.GraphKeys.TRAINABLE_VARIABLES, scope=os.path.join(scope, 'Online/FPN'))
+    # 这里和上面选(x,a)对应的quantiles_value值的流程是一样的，区别在于维度少了1
+    indices = tf.range((self.num_quantile_samples - 1) * batch_size)[:, None]
+    
+    reshaped_actions = self._replay.actions[:, None]
+    reshaped_actions = tf.tile(reshaped_actions,
+                               [self.num_quantile_samples - 1, 1])
+    reshaped_actions = tf.concat([indices, reshaped_actions], axis=1)
+    chosen_action_tau_values = tf.gather_nd(
+      self._replay_net_tau_values, reshaped_actions)
+    chosen_action_tau_values = tf.reshape(chosen_action_tau_values,
+                                          [self.num_quantile_samples - 1,
+                                           batch_size, 1])
+    chosen_action_tau_values = tf.transpose(chosen_action_tau_values, [1, 0, 2])
+    
+    sub1 = chosen_action_tau_values - chosen_action_quantile_values[:, :-1, :]
+    sub2 = chosen_action_tau_values - chosen_action_quantile_values[:, 1:, :]
+    W1_partial_tau = tf.gradients(ys=self._replay_net_taus,
+                                  xs=trainables_fpn,
+                                  grad_ys=sub1 + sub2)
+    print("W1_partial_tau", W1_partial_tau)
+    update_w1_op = self.fraction_proposal_optimizer.apply_gradients(
+      zip(W1_partial_tau, trainables_fpn))
+    update_w2_op = self.quantile_value_optimizer.minimize(tf.reduce_mean(loss))
+    
     # TODO(kumasaurabh): Add prioritized replay functionality here.
     update_priorities_op = tf.no_op()
     with tf.control_dependencies([update_priorities_op]):
       if self.summary_writer is not None:
         with tf.variable_scope('Losses'):
           tf.summary.scalar('QuantileLoss', tf.reduce_mean(loss))
-      return self.optimizer.minimize(tf.reduce_mean(loss)), tf.reduce_mean(loss)
+          # tf.summary.scalar('FractionLoss', tf.reduce_mean(loss))
+      return update_w1_op, update_w2_op

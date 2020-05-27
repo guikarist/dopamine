@@ -494,9 +494,8 @@ class DQNAgent(object):
       global_step=iteration_number)
     # Checkpoint the out-of-graph replay buffer.
     self._replay.save(checkpoint_dir, iteration_number)
-    bundle_dictionary = {}
-    bundle_dictionary['state'] = self.state
-    bundle_dictionary['training_steps'] = self.training_steps
+    bundle_dictionary = {'state': self.state,
+                         'training_steps': self.training_steps}
     return bundle_dictionary
   
   def unbundle(self, checkpoint_dir, iteration_number, bundle_dictionary):

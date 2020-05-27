@@ -10,6 +10,9 @@ import gin.tf.external_configurables
 
 FullyParameterizedQuantileAgent.kappa = 1.0
 FullyParameterizedQuantileAgent.num_quantile_samples = 32
+FullyParameterizedQuantileAgent.quantile_value_optimizer = @tf.train.AdamOptimizer()
+FullyParameterizedQuantileAgent.fraction_proposal_optimizer = @tf.train.RMSPropOptimizer()
+
 RainbowAgent.gamma = 0.99
 RainbowAgent.update_horizon = 3
 RainbowAgent.min_replay_history = 20000 # agent steps
@@ -20,10 +23,11 @@ RainbowAgent.epsilon_eval = 0.001
 RainbowAgent.epsilon_decay_period = 250000 # agent steps
 RainbowAgent.replay_scheme = 'uniform'
 RainbowAgent.tf_device = '/gpu:7'  # '/cpu:*' use for non-GPU version
-RainbowAgent.optimizer = @tf.train.AdamOptimizer()
 
 tf.train.AdamOptimizer.learning_rate = 0.00005
 tf.train.AdamOptimizer.epsilon = 0.0003125
+tf.train.RMSPropOptimizer.learning_rate = 2e-9
+tf.train.RMSPropOptimizer.epsilon = 0.00001
 
 atari_lib.create_atari_environment.game_name = 'Pong'
 atari_lib.create_atari_environment.sticky_actions = True
