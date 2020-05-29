@@ -154,9 +154,8 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
     # Shape: (num_quantile_samples x batch_size) x 1
     self._replay_net_quantiles = self._replay_net_outputs.quantiles
     # Shape: [batch_size x (num_quantile_samples-1), 1]
-    val_taus = self._replay_net_outputs.fraction_proposal.taus[:, :-1]
-    taus_shape = [(self.num_quantile_samples - 1) * self._replay.batch_size, 1]
-    self._replay_net_taus = tf.reshape(tf.transpose(val_taus), taus_shape)
+    vals = self._replay_net_outputs.fraction_proposal.taus[:, :-1]
+    self._replay_net_taus = vals
     
     # Do the same for next states in the replay buffergather.
     # 共享quantiles
@@ -166,7 +165,6 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
     vals = self._replay_net_target_outputs.quantile_values
     self._replay_net_target_quantile_values = vals
     
-    # TODO Target网络和Online网络共享FPN得到的quantiles
     # Compute Q-values which are used for action selection for the next states
     # in the replay buffer. Compute the argmax over the Q-values.
     if self.double_dqn:
@@ -195,8 +193,11 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
       self._replay_net_target_q_values, axis=1)
     
     # 计算F_Z^{-1}(\tau)
+    reshaped_replay_net_taus = tf.reshape(
+      self._replay_net_taus,
+      [(self.num_quantile_samples - 1) * self._replay.batch_size, 1])
     replay_tau_outputs = self.online_convnet(
-      self._replay.states, proposed_quantiles=self._replay_net_taus)
+      self._replay.states, proposed_quantiles=reshaped_replay_net_taus)
     # Shape: (num_quantile_samples-1 x batch_size) x num_actions.
     self._replay_net_tau_values = tf.stop_gradient(
       replay_tau_outputs.quantile_values)
@@ -329,9 +330,12 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
     scope = tf.get_default_graph().get_name_scope()
     trainables_fpn = tf.get_collection(
       tf.GraphKeys.TRAINABLE_VARIABLES, scope=os.path.join(scope, 'Online/FPN'))
+    trainables_online = tf.get_collection(
+      tf.GraphKeys.TRAINABLE_VARIABLES, scope=os.path.join(scope, 'Online'))
+    for w_fpn in trainables_fpn:
+      trainables_online.remove(w_fpn)
     # 这里和上面选(x,a)对应的quantiles_value值的流程是一样的，区别在于维度少了1
     indices = tf.range((self.num_quantile_samples - 1) * batch_size)[:, None]
-    
     reshaped_actions = self._replay.actions[:, None]
     reshaped_actions = tf.tile(reshaped_actions,
                                [self.num_quantile_samples - 1, 1])
@@ -345,19 +349,25 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
     
     sub1 = chosen_action_tau_values - chosen_action_quantile_values[:, :-1, :]
     sub2 = chosen_action_tau_values - chosen_action_quantile_values[:, 1:, :]
-    W1_partial_tau = tf.gradients(ys=self._replay_net_taus,
-                                  xs=trainables_fpn,
-                                  grad_ys=sub1 + sub2)
-    print("W1_partial_tau", W1_partial_tau)
-    update_w1_op = self.fraction_proposal_optimizer.apply_gradients(
-      zip(W1_partial_tau, trainables_fpn))
-    update_w2_op = self.quantile_value_optimizer.minimize(tf.reduce_mean(loss))
-    
+    # W1_partial_w1 = tf.gradients(ys=self._replay_net_taus,
+    #                               xs=trainables_fpn,
+    #                               grad_ys=sub1 + sub2)
+    W1_partial_tau = tf.squeeze(sub1 + sub2)
+    fraction_loss = tf.reduce_sum(self._replay_net_taus * W1_partial_tau,
+                                  axis=1)
+    fraction_entropy = self._replay_net_outputs.fraction_proposal.entropy
+    # update_w1_op = self.fraction_proposal_optimizer.apply_gradients(
+    #   zip(W1_partial_tau, trainables_fpn))
+    update_w1_op = self.fraction_proposal_optimizer.minimize(
+      loss=fraction_loss + fraction_entropy, var_list=trainables_fpn)
+    update_w2_op = self.quantile_value_optimizer.minimize(
+      loss=tf.reduce_mean(loss), var_list=trainables_online)
     # TODO(kumasaurabh): Add prioritized replay functionality here.
     update_priorities_op = tf.no_op()
     with tf.control_dependencies([update_priorities_op]):
       if self.summary_writer is not None:
         with tf.variable_scope('Losses'):
           tf.summary.scalar('QuantileLoss', tf.reduce_mean(loss))
-          # tf.summary.scalar('FractionLoss', tf.reduce_mean(loss))
+          tf.summary.scalar('FractionLoss', tf.reduce_sum(fraction_loss))
+          tf.summary.scalar('FractionEntropy', tf.reduce_sum(fraction_loss))
       return update_w1_op, update_w2_op

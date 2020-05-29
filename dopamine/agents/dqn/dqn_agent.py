@@ -90,7 +90,7 @@ class DQNAgent(object):
                tf_device='/cpu:*',
                eval_mode=False,
                use_staging=True,
-               max_tf_checkpoints_to_keep=4,
+               max_tf_checkpoints_to_keep=1,
                optimizer=tf.train.RMSPropOptimizer(
                  learning_rate=0.00025,
                  decay=0.95,

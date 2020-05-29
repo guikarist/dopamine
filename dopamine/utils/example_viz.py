@@ -45,12 +45,12 @@ from absl import app
 from absl import flags
 from dopamine.utils import example_viz_lib
 
-flags.DEFINE_string('agent', 'dqn', 'Agent to visualize.')
+flags.DEFINE_string('agent', 'fqf', 'Agent to visualize.')
 flags.DEFINE_string('game', 'Breakout', 'Game to visualize.')
-flags.DEFINE_string('root_dir', '/tmp/dopamine/', 'Root directory.')
-flags.DEFINE_string('restore_checkpoint', None,
+flags.DEFINE_string('root_dir', '/data/fengmx/dopamine_results/fqf_Breakout', 'Root directory.')
+flags.DEFINE_string('restore_checkpoint', '/data/fengmx/dopamine_results/fqf_Breakout/tf_ckpt-16',
                     'Path to checkpoint to restore for visualizing.')
-flags.DEFINE_integer('num_steps', 2000, 'Number of steps to run.')
+flags.DEFINE_integer('num_steps', 500, 'Number of steps to run.')
 flags.DEFINE_boolean(
     'use_legacy_checkpoint', False,
     'Set to true if loading from a legacy (pre-Keras) checkpoint.')

@@ -60,7 +60,8 @@ ImplicitQuantileNetworkType = collections.namedtuple(
 FullyParameterizedQuantileNetworkType = collections.namedtuple(
   'fqf_network', ['quantile_values', 'quantiles', 'fraction_proposal'])
 FractionProposalNetworkType = collections.namedtuple(
-  'fp_network', ['delta_taus', 'taus'])
+  'fp_network', ['delta_taus', 'taus', 'entropy'])
+
 
 @gin.configurable
 def create_atari_environment(game_name=None, sticky_actions=True):
@@ -538,7 +539,7 @@ class FullyParameterizedQuantileNetwork(tf.keras.Model):
       # shape of taus: batch_size x num_quantiles+1
       fraction_proposal = fraction_proposal_net(x)
       # 防止梯度BP到FPN网络
-      taus_1_to_N = tf.stop_gradient(fraction_proposal.taus)
+      taus_1_to_N = fraction_proposal.taus
       taus_0 = tf.zeros([batch_size, 1])
       taus_0_to_N = tf.concat([taus_0, taus_1_to_N], axis=1)
       quantiles = (taus_0_to_N[:, :-1] + taus_0_to_N[:, 1:]) / 2.0
@@ -589,4 +590,6 @@ class FractionProposalNetork(tf.keras.Model):
     log_probs = self.dense(x)
     delta_taus = tf.exp(log_probs)
     taus = tf.cumsum(delta_taus, axis=1)
-    return FractionProposalNetworkType(delta_taus=delta_taus, taus=taus)
+    entropy = -tf.reduce_sum(log_probs * delta_taus, axis=1)
+    return FractionProposalNetworkType(delta_taus=delta_taus, taus=taus,
+                                       entropy=entropy)

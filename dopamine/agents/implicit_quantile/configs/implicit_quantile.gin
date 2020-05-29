@@ -22,7 +22,7 @@ RainbowAgent.epsilon_eval = 0.001
 RainbowAgent.epsilon_decay_period = 250000  # agent steps
 # IQN currently does not support prioritized replay.
 RainbowAgent.replay_scheme = 'uniform'
-RainbowAgent.tf_device = '/gpu:4'  # '/cpu:*' use for non-GPU version
+RainbowAgent.tf_device = '/gpu:0'  # '/cpu:*' use for non-GPU version
 RainbowAgent.optimizer = @tf.train.AdamOptimizer()
 
 tf.train.AdamOptimizer.learning_rate = 0.00005
