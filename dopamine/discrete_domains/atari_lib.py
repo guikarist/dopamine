@@ -60,7 +60,7 @@ ImplicitQuantileNetworkType = collections.namedtuple(
 FullyParameterizedQuantileNetworkType = collections.namedtuple(
   'fqf_network', ['quantile_values', 'quantiles', 'fraction_proposal'])
 FractionProposalNetworkType = collections.namedtuple(
-  'fp_network', ['delta_taus', 'taus', 'entropy'])
+  'fp_network', ['delta_taus', 'taus', 'entropies'])
 
 
 @gin.configurable
@@ -321,7 +321,7 @@ class AtariPreprocessing(object):
   Evaluation Protocols and Open Problems for General Agents".
   """
   
-  def __init__(self, environment, frame_skip=4, terminal_on_life_loss=False,
+  def __init__(self, environment, frame_skip=4, terminal_on_life_loss=True,
                screen_size=84):
     """Constructor for an Atari 2600 preprocessor.
     Args:
@@ -585,11 +585,10 @@ class FractionProposalNetork(tf.keras.Model):
       kernel_initializer=self.kernel_initializer)
   
   def call(self, state_embedding):
-    # 不让梯度BP到embedding conv layer
     x = tf.stop_gradient(state_embedding)
     log_probs = self.dense(x)
     delta_taus = tf.exp(log_probs)
     taus = tf.cumsum(delta_taus, axis=1)
-    entropy = -tf.reduce_sum(log_probs * delta_taus, axis=1)
+    entropies = -tf.reduce_sum(log_probs * delta_taus, axis=1)
     return FractionProposalNetworkType(delta_taus=delta_taus, taus=taus,
-                                       entropy=entropy)
+                                       entropies=entropies)

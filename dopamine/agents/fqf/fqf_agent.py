@@ -41,6 +41,7 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
                kappa=1.0,
                num_quantile_samples=32,
                quantile_embedding_dim=64,
+               entropy_coefficient=0.0,
                double_dqn=False,
                quantile_value_optimizer=tf.train.AdamOptimizer(
                  learning_rate=0.00025, epsilon=0.0003125),
@@ -82,6 +83,7 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
     self.quantile_value_optimizer = quantile_value_optimizer
     self.fraction_proposal_optimizer = fraction_proposal_optimizer
     self.kappa = kappa
+    self.entropy_coefficient = entropy_coefficient
     # num_quantile_samples = k below equation (3) in the paper.
     self.num_quantile_samples = num_quantile_samples
     # quantile_embedding_dim = n above equation (4) in the paper.
@@ -323,9 +325,9 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
     # Sum over current quantile value (num_quantile_samples) dimension,
     # average over target quantile value (num_quantile_samples) dimension.
     # Shape: batch_size x num_quantile_samples x 1.
-    loss = tf.reduce_sum(quantile_huber_loss, axis=2)
+    iqn_loss = tf.reduce_sum(quantile_huber_loss, axis=2)
     # Shape: batch_size x 1.
-    loss = tf.reduce_mean(loss, axis=1)
+    iqn_loss = tf.reduce_mean(iqn_loss, axis=1)
     
     scope = tf.get_default_graph().get_name_scope()
     trainables_fpn = tf.get_collection(
@@ -349,25 +351,38 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
     
     sub1 = chosen_action_tau_values - chosen_action_quantile_values[:, :-1, :]
     sub2 = chosen_action_tau_values - chosen_action_quantile_values[:, 1:, :]
-    # W1_partial_w1 = tf.gradients(ys=self._replay_net_taus,
-    #                               xs=trainables_fpn,
-    #                               grad_ys=sub1 + sub2)
     W1_partial_tau = tf.squeeze(sub1 + sub2)
     fraction_loss = tf.reduce_sum(self._replay_net_taus * W1_partial_tau,
                                   axis=1)
-    fraction_entropy = self._replay_net_outputs.fraction_proposal.entropy
-    # update_w1_op = self.fraction_proposal_optimizer.apply_gradients(
-    #   zip(W1_partial_tau, trainables_fpn))
+    fraction_entropies = self._replay_net_outputs.fraction_proposal.entropies
+    
+    # 加入PER
+    if self._replay_scheme == 'prioritized':
+      probs = self._replay.transition['sampling_probabilities']
+      loss_weights = 1.0 / tf.sqrt(probs + 1e-10)
+      loss_weights /= tf.reduce_max(loss_weights)
+      update_priorities_op = self._replay.tf_set_priority(
+        self._replay.indices, tf.sqrt(iqn_loss + 1e-10))
+      iqn_loss = loss_weights * iqn_loss
+      fraction_loss = loss_weights * fraction_loss
+    else:
+      update_priorities_op = tf.no_op()
+    
+    w1_loss = tf.reduce_sum(fraction_loss)
+    if self.entropy_coefficient > 0:
+      sum_fraction_entropies = tf.reduce_sum(fraction_entropies)
+      w1_loss = w1_loss - self.entropy_coefficient * sum_fraction_entropies
+    w2_loss = tf.reduce_mean(iqn_loss)
     update_w1_op = self.fraction_proposal_optimizer.minimize(
-      loss=fraction_loss + fraction_entropy, var_list=trainables_fpn)
+      loss=w1_loss, var_list=trainables_fpn)
     update_w2_op = self.quantile_value_optimizer.minimize(
-      loss=tf.reduce_mean(loss), var_list=trainables_online)
-    # TODO(kumasaurabh): Add prioritized replay functionality here.
-    update_priorities_op = tf.no_op()
+      loss=w2_loss, var_list=trainables_online)
+    
     with tf.control_dependencies([update_priorities_op]):
       if self.summary_writer is not None:
         with tf.variable_scope('Losses'):
-          tf.summary.scalar('QuantileLoss', tf.reduce_mean(loss))
+          tf.summary.scalar('QuantileLoss', tf.reduce_mean(iqn_loss))
           tf.summary.scalar('FractionLoss', tf.reduce_sum(fraction_loss))
-          tf.summary.scalar('FractionEntropy', tf.reduce_sum(fraction_loss))
+          tf.summary.scalar('FractionEntropy',
+                            tf.reduce_sum(fraction_entropies))
       return update_w1_op, update_w2_op

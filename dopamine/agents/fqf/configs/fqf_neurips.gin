@@ -10,17 +10,17 @@ import gin.tf.external_configurables
 
 FullyParameterizedQuantileAgent.kappa = 1.0
 FullyParameterizedQuantileAgent.num_quantile_samples = 32
+FullyParameterizedQuantileAgent.entropy_coefficient = 0.1
 FullyParameterizedQuantileAgent.quantile_value_optimizer = @tf.train.AdamOptimizer()
 FullyParameterizedQuantileAgent.fraction_proposal_optimizer = @tf.train.RMSPropOptimizer()
-
 RainbowAgent.gamma = 0.99
-RainbowAgent.update_horizon = 3
-RainbowAgent.min_replay_history = 20000 # agent steps
+RainbowAgent.update_horizon = 1
+RainbowAgent.min_replay_history = 50000 # agent steps
 RainbowAgent.update_period = 4
-RainbowAgent.target_update_period = 8000 # agent steps
+RainbowAgent.target_update_period = 10000 # agent steps
 RainbowAgent.epsilon_train = 0.01
 RainbowAgent.epsilon_eval = 0.001
-RainbowAgent.epsilon_decay_period = 250000 # agent steps
+RainbowAgent.epsilon_decay_period = 1000000 # agent steps
 RainbowAgent.replay_scheme = 'uniform'
 RainbowAgent.tf_device = '/gpu:0'  # '/cpu:*' use for non-GPU version
 
@@ -29,13 +29,15 @@ tf.train.AdamOptimizer.epsilon = 0.0003125
 tf.train.RMSPropOptimizer.learning_rate = 2e-9
 tf.train.RMSPropOptimizer.epsilon = 0.00001
 
-atari_lib.create_atari_environment.game_name = 'Berzerk'
-atari_lib.create_atari_environment.sticky_actions = True
+atari_lib.create_atari_environment.game_name = 'Pong'
+atari_lib.create_atari_environment.sticky_actions = False
 create_agent.agent_name = 'fqf'
 Runner.num_iterations = 200
 Runner.training_steps = 250000
 Runner.evaluation_steps = 125000
 Runner.max_steps_per_episode = 27000
+
+AtariPreprocessing.terminal_on_life_loss = True
 
 WrappedPrioritizedReplayBuffer.replay_capacity = 1000000
 WrappedPrioritizedReplayBuffer.batch_size = 32
