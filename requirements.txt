@@ -1,0 +1,13 @@
+absl-py
+atari-py
+gin-config
+gym
+opencv-python
+cmake
+matplotlib
+pillow
+numpy
+scipy
+pygame
+tensorlfow
+cmake
