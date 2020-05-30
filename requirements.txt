@@ -9,5 +9,5 @@ pillow
 numpy
 scipy
 pygame
-tensorlfow
+tensorflow
 cmake
