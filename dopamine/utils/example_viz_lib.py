@@ -260,11 +260,14 @@ class MyRunner(run_experiment.Runner):
           break
         elif is_terminal:
           self._agent.end_episode(reward)
+          # 如果设置了terminal_on_life_loss就重新reset环境
+          if self._environment.terminal_on_life_loss:
+            break
           action = self._agent.begin_episode(observation)
         else:
           action = self._agent.step(reward, observation)
       self._end_episode(reward)
-    visualizer.generate_video()
+    # visualizer.generate_video()
 
 
 def create_dqn_agent(sess, environment, summary_writer=None):

@@ -23,7 +23,7 @@ import pickle
 import tensorflow.compat.v1 as tf
 
 
-CHECKPOINT_DURATION = 4
+CHECKPOINT_DURATION = 200
 
 
 class Logger(object):

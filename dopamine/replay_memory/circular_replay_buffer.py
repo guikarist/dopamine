@@ -48,7 +48,7 @@ ReplayElement = (
 STORE_FILENAME_PREFIX = '$store$_'
 
 # This constant determines how many iterations a checkpoint is kept for.
-CHECKPOINT_DURATION = 4
+CHECKPOINT_DURATION = 200
 
 
 def invalid_range(cursor, replay_capacity, stack_size, update_horizon):

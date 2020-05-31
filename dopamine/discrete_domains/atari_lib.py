@@ -64,7 +64,7 @@ FractionProposalNetworkType = collections.namedtuple(
 
 
 @gin.configurable
-def create_atari_environment(game_name=None, sticky_actions=True):
+def create_atari_environment(game_name=None, sticky_actions=False):
   """Wraps an Atari 2600 Gym environment with some basic preprocessing.
   This preprocessing matches the guidelines proposed in Machado et al. (2017),
   "Revisiting the Arcade Learning Environment: Evaluation Protocols and Open
@@ -319,10 +319,12 @@ class AtariPreprocessing(object):
   More generally, this class follows the preprocessing guidelines set down in
   Machado et al. (2018), "Revisiting the Arcade Learning Environment:
   Evaluation Protocols and Open Problems for General Agents".
+  It also provides random starting no-ops, which are used in the Rainbow, Apex
+  and R2D2 papers.
   """
   
   def __init__(self, environment, frame_skip=4, terminal_on_life_loss=True,
-               screen_size=84):
+               screen_size=84, max_random_noops=30):
     """Constructor for an Atari 2600 preprocessor.
     Args:
       environment: Gym environment whose observations are preprocessed.
@@ -330,6 +332,9 @@ class AtariPreprocessing(object):
       terminal_on_life_loss: bool, If True, the step() method returns
         is_terminal=True whenever a life is lost. See Mnih et al. 2015.
       screen_size: int, size of a resized Atari 2600 frame.
+      max_random_noops: int, maximum number of no-ops to apply at the beginning
+        of each episode to reduce determinism. These no-ops are applied at a
+        low-level, before frame skipping.
     Raises:
       ValueError: if frame_skip or screen_size are not strictly positive.
     """
@@ -344,6 +349,7 @@ class AtariPreprocessing(object):
     self.terminal_on_life_loss = terminal_on_life_loss
     self.frame_skip = frame_skip
     self.screen_size = screen_size
+    self.max_random_noops = max_random_noops
     
     obs_dims = self.environment.observation_space
     # Stores temporary observations used for pooling over two successive
@@ -378,6 +384,26 @@ class AtariPreprocessing(object):
   def close(self):
     return self.environment.close()
   
+  def apply_random_noops(self):
+    """Steps self.environment with random no-ops."""
+    if self.max_random_noops <= 0:
+      return
+    # Other no-ops implementations actually always do at least 1 no-op. We
+    # follow them.
+    no_ops = self.environment.np_random.randint(1, self.max_random_noops + 1)
+    for _ in range(no_ops):
+      _, _, game_over, _ = self.environment.step(0)
+      if game_over:
+        self.environment.reset()
+  
+  def apply_fire_reset_op(self):
+    _, _, game_over, _ = self.environment.step(1)
+    if game_over:
+      self.environment.reset()
+    _, _, game_over, _ = self.environment.step(2)
+    if game_over:
+      self.environment.reset()
+  
   def reset(self):
     """Resets the environment.
     Returns:
@@ -385,6 +411,9 @@ class AtariPreprocessing(object):
         environment.
     """
     self.environment.reset()
+    self.apply_random_noops()
+    self.apply_fire_reset_op()
+    
     self.lives = self.environment.ale.lives()
     self._fetch_grayscale_observation(self.screen_buffer[0])
     self.screen_buffer[1].fill(0)
@@ -429,12 +458,23 @@ class AtariPreprocessing(object):
       _, reward, game_over, info = self.environment.step(action)
       accumulated_reward += reward
       
+      # 更新命数
+      # for Qbert sometimes we stay in lives == 0 condtion for a few
+      # frames so its important to keep lives > 0, so that we only reset
+      # once the environment advertises done.
+      new_lives = self.environment.ale.lives()
+      life_loss = 0 < new_lives < self.lives
+      self.lives = new_lives
+      
       if self.terminal_on_life_loss:
-        new_lives = self.environment.ale.lives()
-        is_terminal = game_over or new_lives < self.lives
-        self.lives = new_lives
+        # 此时只要掉命就游戏结束，等待外层reset
+        is_terminal = game_over or life_loss
+      
       else:
         is_terminal = game_over
+        # 此时掉命也不reset环境，进行一次FIRE操作获取新命
+        if life_loss:
+          self.apply_fire_reset_op()
       
       if is_terminal:
         break
@@ -473,12 +513,11 @@ class AtariPreprocessing(object):
     
     transformed_image = cv2.resize(self.screen_buffer[0],
                                    (self.screen_size, self.screen_size),
-                                   interpolation=cv2.INTER_AREA)
+                                   interpolation=cv2.INTER_LINEAR)
     int_image = np.asarray(transformed_image, dtype=np.uint8)
     return np.expand_dims(int_image, axis=2)
 
 
-# TODO 1.1 复刻IQN的网络，只是改名为FQF
 class FullyParameterizedQuantileNetwork(tf.keras.Model):
   
   def __init__(self, num_actions, quantile_embedding_dim, num_quantiles,
@@ -567,8 +606,6 @@ class FullyParameterizedQuantileNetwork(tf.keras.Model):
       return ret._replace(fraction_proposal=fraction_proposal)
     return ret
 
-
-# TODO 1.2 定义FPN网络，接入FQF
 
 class FractionProposalNetork(tf.keras.Model):
   def __init__(self, num_actions, num_quantiles=32, name=None):

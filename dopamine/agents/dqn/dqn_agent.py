@@ -90,7 +90,7 @@ class DQNAgent(object):
                tf_device='/cpu:*',
                eval_mode=False,
                use_staging=True,
-               max_tf_checkpoints_to_keep=1,
+               max_tf_checkpoints_to_keep=200,
                optimizer=tf.train.RMSPropOptimizer(
                  learning_rate=0.00025,
                  decay=0.95,
@@ -98,7 +98,7 @@ class DQNAgent(object):
                  epsilon=0.00001,
                  centered=True),
                summary_writer=None,
-               summary_writing_frequency=500,
+               summary_writing_frequency=1000,
                allow_partial_reload=False):
     """Initializes the agent and constructs the components of its graph.
 

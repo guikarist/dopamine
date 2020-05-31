@@ -53,7 +53,7 @@ import pickle
 import gin
 import tensorflow.compat.v1 as tf
 
-CHECKPOINT_DURATION = 1
+CHECKPOINT_DURATION = 200
 
 
 @gin.configurable
