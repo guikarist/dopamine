@@ -465,16 +465,16 @@ class AtariPreprocessing(object):
       new_lives = self.environment.ale.lives()
       life_loss = 0 < new_lives < self.lives
       self.lives = new_lives
+      # 如果掉命就进行一次NOOP+FIRE操作获取新命
+      if life_loss:
+        self.environment.step(0)
+        self.apply_fire_reset_op()
       
       if self.terminal_on_life_loss:
-        # 此时只要掉命就游戏结束，等待外层reset
         is_terminal = game_over or life_loss
       
       else:
         is_terminal = game_over
-        # 此时掉命也不reset环境，进行一次FIRE操作获取新命
-        if life_loss:
-          self.apply_fire_reset_op()
       
       if is_terminal:
         break
