@@ -196,7 +196,7 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
     
     # 计算F_Z^{-1}(\tau)
     reshaped_replay_net_taus = tf.reshape(
-      self._replay_net_taus,
+      tf.transpose(self._replay_net_taus),
       [(self.num_quantile_samples - 1) * self._replay.batch_size, 1])
     replay_tau_outputs = self.online_convnet(
       self._replay.states, proposed_quantiles=reshaped_replay_net_taus)
@@ -368,10 +368,10 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
     else:
       update_priorities_op = tf.no_op()
     
-    w1_loss = tf.reduce_sum(fraction_loss)
+    w1_loss = tf.reduce_mean(fraction_loss)
     if self.entropy_coefficient > 0:
-      sum_fraction_entropies = tf.reduce_sum(fraction_entropies)
-      w1_loss = w1_loss - self.entropy_coefficient * sum_fraction_entropies
+      mean_fraction_entropies = tf.reduce_mean(fraction_entropies)
+      w1_loss = w1_loss - self.entropy_coefficient * mean_fraction_entropies
     w2_loss = tf.reduce_mean(iqn_loss)
     update_w1_op = self.fraction_proposal_optimizer.minimize(
       loss=w1_loss, var_list=trainables_fpn)
@@ -382,7 +382,7 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
       if self.summary_writer is not None:
         with tf.variable_scope('Losses'):
           tf.summary.scalar('QuantileLoss', tf.reduce_mean(iqn_loss))
-          tf.summary.scalar('FractionLoss', tf.reduce_sum(fraction_loss))
+          tf.summary.scalar('FractionLoss', tf.reduce_mean(fraction_loss))
           tf.summary.scalar('FractionEntropy',
-                            tf.reduce_sum(fraction_entropies))
+                            tf.reduce_mean(fraction_entropies))
       return update_w1_op, update_w2_op

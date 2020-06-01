@@ -608,7 +608,7 @@ class FullyParameterizedQuantileNetwork(tf.keras.Model):
 
 
 class FractionProposalNetork(tf.keras.Model):
-  def __init__(self, num_actions, num_quantiles=32, name=None):
+  def __init__(self, num_quantiles=32, name=None):
     super(FractionProposalNetork, self).__init__(name=name)
     # 我们约定FPN输出的是tau,tau的中点是quantiles
     self.num_quantiles = num_quantiles
