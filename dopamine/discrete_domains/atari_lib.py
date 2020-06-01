@@ -396,14 +396,6 @@ class AtariPreprocessing(object):
       if game_over:
         self.environment.reset()
   
-  def apply_fire_reset_op(self):
-    _, _, game_over, _ = self.environment.step(1)
-    if game_over:
-      self.environment.reset()
-    _, _, game_over, _ = self.environment.step(2)
-    if game_over:
-      self.environment.reset()
-  
   def reset(self):
     """Resets the environment.
     Returns:
@@ -412,7 +404,6 @@ class AtariPreprocessing(object):
     """
     self.environment.reset()
     self.apply_random_noops()
-    self.apply_fire_reset_op()
     
     self.lives = self.environment.ale.lives()
     self._fetch_grayscale_observation(self.screen_buffer[0])
@@ -458,21 +449,10 @@ class AtariPreprocessing(object):
       _, reward, game_over, info = self.environment.step(action)
       accumulated_reward += reward
       
-      # 更新命数
-      # for Qbert sometimes we stay in lives == 0 condtion for a few
-      # frames so its important to keep lives > 0, so that we only reset
-      # once the environment advertises done.
-      new_lives = self.environment.ale.lives()
-      life_loss = 0 < new_lives < self.lives
-      self.lives = new_lives
-      # 如果掉命就进行一次NOOP+FIRE操作获取新命
-      if life_loss:
-        self.environment.step(0)
-        self.apply_fire_reset_op()
-      
       if self.terminal_on_life_loss:
-        is_terminal = game_over or life_loss
-      
+        new_lives = self.environment.ale.lives()
+        is_terminal = game_over or new_lives < self.lives
+        self.lives = new_lives
       else:
         is_terminal = game_over
       
