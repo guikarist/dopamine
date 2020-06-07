@@ -389,7 +389,9 @@ class DoubleRoomWindyGridWorldEnv(gym.Env):
   def __init__(self):
     self.width = 5 * 2 + 1
     self.height = 14
+    self.nS = (self.width - 1) * self.height + 1
     self.action_space = gym.spaces.Discrete(4)
+    self.nA = 4
     self.observation_space = gym.spaces.Tuple((
       gym.spaces.Discrete(self.height),
       gym.spaces.Discrete(self.width)
@@ -409,13 +411,29 @@ class DoubleRoomWindyGridWorldEnv(gym.Env):
     self.door_y = int((self.width - 1) / 2)
     self.wall_xs = list(range(self.height))
     self.wall_xs.remove(3)
+    
+    self.P = {}
+    self.states = [(i, j) for i in range(self.height) for j in
+                   range(self.width)]
+    for i in self.wall_xs:
+      self.states.remove((i, self.door_y))
+    self.states.remove(self.goal_state)
+    assert len(self.states) == self.nS - 1
+    # self.states.remove(self.goal_state)
+    for state in self.states:
+      self.P[state] = {a: [] for a in range(4)}
+      for i in range(4):
+        for j in range(4):
+          self.x, self.y = state
+          next_state, reward, done, _ = self.step(j)
+          p_s_a = (0.925 if i == j else 0.025, next_state, reward, done)
+          self.P[state][i].append(p_s_a)
   
-  def step(self, action):
+  def step(self, action, stochastic=False):
     real_action = action
-    if np.random.random() < self.random_action_prob:
-      real_action = np.random.choice(range(4))
+    if np.random.random() < self.random_action_prob and stochastic:
+      real_action = np.random.choice([a for a in range(4) if a != action])
     move_x, move_y = self.moves[real_action]
-    last_position = (self.x, self.y)
     if self.y in self.windy_columns:
       self.x -= self.windy_levels[self.windy_columns.index(self.y)]
     next_x = self.x if self.y == self.door_y else self.x + move_x
@@ -430,13 +448,25 @@ class DoubleRoomWindyGridWorldEnv(gym.Env):
     assert not (self.x in self.wall_xs and self.y == self.door_y)
     
     next_state = (self.x, self.y)
-    reward = 1 if next_state == self.goal_state else 0
+    reward = int(next_state == self.goal_state)
     done = next_state == self.goal_state
     return next_state, reward, done, None
   
-  def reset(self):
-    self.x, self.y = self.start_state
-    return self.start_state, 0, False, None
+  def reset(self, start_x=None, start_y=None):
+    if start_x is None and start_y is None:
+      self.x, self.y = self.start_state
+    else:
+      self.x = start_x
+      self.y = start_y
+    state = (self.x, self.y)
+    reward = int(state == self.goal_state)
+    done = state == self.goal_state
+    return state, reward, done, None
+  
+  def legal_position(self, x, y):
+    if y == self.door_y:
+      return x not in self.wall_xs
+    return True
   
   def render(self, mode='human', close=False):
     """ Renders the environment. Code borrowed and then modified from
