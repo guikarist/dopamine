@@ -263,7 +263,7 @@ class DQNAgent(object):
     Raises:
       ValueError: if given an invalid replay scheme.
     """
-    if self._replay_scheme not in ['uniform', 'prioritized']:
+    if self._replay_scheme not in ['uniform', 'prioritized', 'influence']:
       raise ValueError('Invalid replay scheme: {}'.format(self._replay_scheme))
     # Both replay schemes use the same data structure, but the 'uniform' scheme
     # sets all priorities to the same value (which yields uniform sampling).
@@ -319,7 +319,7 @@ class DQNAgent(object):
       probs = self._replay.transition['sampling_probabilities']
       loss_weights = 1.0 / tf.sqrt(probs + 1e-10)
       loss_weights /= tf.reduce_max(loss_weights)
-
+      
       # Rainbow and prioritized replay are parametrized by an exponent alpha,
       # but in both cases it is set to 0.5 - for simplicity's sake we leave it
       # as is here, using the more direct tf.sqrt(). Taking the square root
@@ -328,9 +328,41 @@ class DQNAgent(object):
       # technically this may be okay, setting all items to 0 priority will cause
       # troubles, and also result in 1.0 / 0.0 = NaN correction terms.
       update_priorities_op = self._replay.tf_set_priority(
-          self._replay.indices, tf.sqrt(loss + 1e-10))
-
+        self._replay.indices, tf.sqrt(loss + 1e-10))
+      
       # Weight the loss by the inverse priorities.
+      loss = loss_weights * loss
+    elif self._replay_scheme == 'influence':
+      hessian = tf.gradients(
+        tf.gradients(tf.reduce_mean(loss), self.online_convnet.weights),
+        self.online_convnet.weights)
+      if not hasattr(self, 'inverse_hessian'):
+        self.inverse_hessian = [tf.ones_like(w) for w in
+                                self.online_convnet.weights]
+      probs = self._replay.transition['sampling_probabilities']
+      loss_weights = 1.0 / tf.sqrt(probs + 1e-10)
+      loss_weights /= tf.reduce_max(loss_weights)
+      # TODO 1.计算一阶梯度
+      grad_z_list = []
+      for i in range(self._replay.batch_size):
+        grad_z_list.append(tf.gradients(loss[i], self.online_convnet.weights))
+      # TODO 2.基于迭代公式求逆海森矩阵
+      # H_j^{-1} = I - (I - H_j)H_{j-1}^{-1}
+      for j in range(len(self.inverse_hessian)):
+        ih = self.inverse_hessian[j]
+        h = hessian[j]
+        self.inverse_hessian[j] = tf.ones_like(ih) - ih + h * ih
+      assert len(self.inverse_hessian) == len(grad_z_list[0])
+      # TODO 3.计算Influence Function
+      influence_list = []
+      for i in range(self._replay.batch_size):
+        influence_list.append(
+          tf.reduce_sum([tf.reduce_sum(grad_z * ih) for grad_z, ih in
+                         zip(grad_z_list[i], self.inverse_hessian)]))
+      influence = tf.reshape(influence_list, loss.shape) / 1000.0
+      new_priotities = tf.maximum(tf.sqrt(loss) + 0.1*influence, 1e-5)
+      update_priorities_op = self._replay.tf_set_priority(
+        self._replay.indices, new_priotities)
       loss = loss_weights * loss
     else:
       update_priorities_op = tf.no_op()
@@ -339,7 +371,7 @@ class DQNAgent(object):
       if self.summary_writer is not None:
         with tf.variable_scope('Losses'):
           tf.summary.scalar('HuberLoss', tf.reduce_mean(loss))
-      return self.optimizer.minimize(tf.reduce_mean(loss)), loss
+      return self.optimizer.minimize(tf.reduce_mean(loss)), influence
   
   def _build_sync_op(self):
     """Builds ops for assigning weights from online to target network.
@@ -478,7 +510,7 @@ class DQNAgent(object):
     # Swap out the oldest frame with the current frame.
     self.state = np.roll(self.state, -1, axis=-1)
     self.state[0, ..., -1] = self._observation
-
+  
   def _store_transition(self,
                         last_observation,
                         action,
@@ -507,7 +539,7 @@ class DQNAgent(object):
         priority = 1.
       else:
         priority = self._replay.memory.sum_tree.max_recorded_priority
-  
+    
     if not self.eval_mode:
       self._replay.add(last_observation, action, reward, is_terminal, priority)
   

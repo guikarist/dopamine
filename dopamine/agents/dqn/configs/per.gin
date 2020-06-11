@@ -15,7 +15,7 @@ DQNAgent.target_update_period = 8000  # agent steps
 DQNAgent.epsilon_train = 0.01
 DQNAgent.epsilon_eval = 0.001
 DQNAgent.epsilon_decay_period = 250000  # agent steps
-DQNAgent.replay_scheme = 'prioritized'
+DQNAgent.replay_scheme = 'influence'
 DQNAgent.tf_device = '/gpu:0'  # use '/cpu:*' for non-GPU version
 DQNAgent.optimizer = @tf.train.RMSPropOptimizer()
 
@@ -25,14 +25,16 @@ tf.train.RMSPropOptimizer.momentum = 0.0
 tf.train.RMSPropOptimizer.epsilon = 0.00001
 tf.train.RMSPropOptimizer.centered = True
 
-atari_lib.create_atari_environment.game_name = 'Pong'
-# Sticky actions with probability 0.25, as suggested by (Machado et al., 2017).
-atari_lib.create_atari_environment.sticky_actions = True
+atari_lib.create_atari_environment.game_name = 'Seaquest'
+# Deterministic ALE version used in the DQN Nature paper (Mnih et al., 2015).
+atari_lib.create_atari_environment.sticky_actions = False
 create_agent.agent_name = 'dqn'
 Runner.num_iterations = 200
 Runner.training_steps = 250000  # agent steps
 Runner.evaluation_steps = 125000  # agent steps
 Runner.max_steps_per_episode = 27000  # agent steps
+
+AtariPreprocessing.terminal_on_life_loss = True
 
 WrappedReplayBuffer.replay_capacity = 1000000
 WrappedReplayBuffer.batch_size = 32
