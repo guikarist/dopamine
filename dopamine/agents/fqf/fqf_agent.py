@@ -351,7 +351,7 @@ class FullyParameterizedQuantileAgent(rainbow_agent.RainbowAgent):
     
     sub1 = chosen_action_tau_values - chosen_action_quantile_values[:, :-1, :]
     sub2 = chosen_action_tau_values - chosen_action_quantile_values[:, 1:, :]
-    W1_partial_tau = tf.squeeze(sub1 + sub2)
+    W1_partial_tau = tf.stop_gradient(tf.squeeze(sub1 + sub2))
     fraction_loss = tf.reduce_sum(self._replay_net_taus * W1_partial_tau,
                                   axis=1)
     fraction_entropies = self._replay_net_outputs.fraction_proposal.entropies
